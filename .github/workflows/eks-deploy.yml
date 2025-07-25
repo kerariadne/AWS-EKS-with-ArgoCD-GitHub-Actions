@@ -1,0 +1,144 @@
+name: Deploy to EKS with Argo CD (Multi-Job)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # JOB 1: ინფრასტრუქტურის მომზადება და ArgoCD-ის ინსტალაცია
+  setup_argocd:
+    runs-on: ubuntu-latest
+    outputs:
+      argocd_server_url: ${{ steps.get_argocd_url.outputs.url }}
+      argocd_admin_password: ${{ steps.get_argocd_password.outputs.password }}
+    steps:
+      - name: რეპოზიტორიის კოდის ჩამოტვირთვა
+        uses: actions/checkout@v3 
+
+      - name: AWS Credentials-ების კონფიგურაცია
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2 
+
+      - name: eksctl ინსტალაცია
+        run: |
+          ARCH=amd64  
+          PLATFORM=$(uname -s)_$ARCH
+          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+          curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_checksums.txt" | grep $PLATFORM | sha256sum --check
+          tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+          sudo mv /tmp/eksctl /usr/local/bin
+
+          
+      - name: EKS კლასტერის შემოწმება ან შექმნა
+        id: check_or_create_eks
+        run: |
+          CLUSTER_NAME="gitops-cluster"
+          REGION="us-west-2"
+          if eksctl get cluster --name $CLUSTER_NAME --region $REGION --output json | jq -e '.[0].Name' > /dev/null; then
+            echo "EKS კლასტერი $CLUSTER_NAME უკვე არსებობს."
+          else
+            eksctl create cluster \
+              --name $CLUSTER_NAME \
+              --region $REGION \
+              --version 1.27 \
+              --nodegroup-name standard-workers \
+              --node-type t3.medium \
+              --nodes 1 \
+              --nodes-min 1 \
+              --nodes-max 2 \
+              --managed \
+              --with-oidc  
+          fi
+      
+      - name: Kubeconfig-ის განახლება EKS კლასტერთან დასაკავშირებლად
+        run: aws eks update-kubeconfig --region us-west-2 --name gitops-cluster 
+
+      - name: ArgoCD Namespace-ის შექმნა (თუ არ არსებობს)
+        run: kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: ArgoCD-ის ინსტალაცია
+        run: kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+      - name: ArgoCD Deployment-ების მზადყოფნის ლოდინი
+        run: |
+          echo "ველოდებით ArgoCD-ის კომპონენტების სრულად ამუშავებას..."
+          kubectl wait --for=condition=available deployment --all -n argocd --timeout=300s
+
+      - name: ArgoCD სერვერის სერვისის ტიპის შეცვლა LoadBalancer-ზე
+        run: |
+          kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "LoadBalancer"}}'
+
+      - name: ArgoCD სერვერის გარე IP/Hostname-ის მიღება და შენახვა
+        id: get_argocd_url
+        run: |
+          for i in {1..30}; do
+            URL_OR_IP=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -z "$URL_OR_IP" ]; then
+                URL_OR_IP=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            fi
+
+            if [ -n "$URL_OR_IP" ]; then
+              if [[ "$URL_OR_IP" == http* ]]; then
+                FINAL_URL="$URL_OR_IP"
+              else
+                FINAL_URL="https://$URL_OR_IP" 
+              fi
+              echo "ArgoCD URL: $FINAL_URL"
+              echo "::set-output name=url::$FINAL_URL" 
+              break
+            fi
+            if [ $i -eq 30 ]; then echo "ArgoCD LoadBalancer-ის IP/Hostname ვერ მოიძებნა 5 წუთში."; exit 1; fi
+            sleep 10
+          done
+
+      - name: ArgoCD-ის საწყისი ადმინისტრატორის პაროლის მიღება და შენახვა
+        id: get_argocd_password
+        run: |
+          echo "ვიღებთ ArgoCD-ის ადმინისტრატორის პაროლს..."
+          PASSWORD=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath="{.data.password}" | base64 -d)
+          echo "::set-output name=password::$PASSWORD"
+          echo "ArgoCD Admin Password : $PASSWORD"
+
+
+  # JOB 2: ArgoCD Application-ის შექმნა 
+  create_argocd_application:
+    runs-on: ubuntu-latest
+    needs: setup_argocd 
+    steps:
+      - name: რეპოზიტორიის კოდის ჩამოტვირთვა 
+        uses: actions/checkout@v3
+
+      - name: AWS Credentials-ების კონფიგურაცია 
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Kubeconfig-ის განახლება EKS კლასტერთან დასაკავშირებლად
+        run: aws eks update-kubeconfig --region us-west-2 --name gitops-cluster
+
+      - name: Nginx აპლიკაციისთვის ArgoCD Application რესურსის შექმნა
+        run: kubectl apply -f EKS_Cluster/argocd-app.yaml -n argocd
+
+      - name: აპლიკაციის URL
+        run: |
+          for i in {1..30}; do
+            IP=$(kubectl get svc httpd -o jsonpath="{.status.loadBalancer.ingress[0].hostname}")
+            if [ -n "$IP" ]; then echo "აპლიკაციიკს URL: http://$IP"; break; fi
+            sleep 10
+          done
+
+
+  # JOB 3: ინფორმაციის გამოტანა და workflow-ს დასრულება
+  workflow_summary:
+    runs-on: ubuntu-latest
+    needs: [setup_argocd, create_argocd_application] 
+    steps:
+      - name: ArgoCD-ის წვდომის ინფორმაციის ჩვენება
+        run: |
+          echo "ArgoCD Workflow წარმატებით დასრულდა!"
+          echo "ArgoCD სერვერის URL: ${{ needs.setup_argocd.outputs.argocd_server_url }}"
+          echo "ArgoCD ადმინისტრატორის პაროლი: ${{ needs.setup_argocd.outputs.argocd_admin_password }}"
