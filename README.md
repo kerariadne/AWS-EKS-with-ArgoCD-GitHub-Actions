@@ -1,10 +1,10 @@
-# 🚀 GitOps on AWS EKS with ArgoCD, GitHub Actions & Nginx
+# GitOps on AWS EKS with ArgoCD, GitHub Actions & Nginx
 
 This project showcases a complete GitOps workflow for deploying and managing an Nginx web server on Amazon Web Services (AWS) Elastic Kubernetes Service (EKS). The entire process, from infrastructure provisioning (ArgoCD setup) to application deployment, is orchestrated by ArgoCD, with GitHub Actions facilitating the initial setup and continuous synchronization based on GitOps principles.
 
 ![Workflow](workflow.png)
 
-## 🌟 Core Concepts Demonstrated
+## Core Concepts Demonstrated
 
 *   **Git as the Single Source of Truth:** All configurations for the EKS cluster, ArgoCD, and the Nginx application reside in this Git repository.
 *   **Declarative Configuration:** Kubernetes manifests define the desired state of the application and infrastructure.
@@ -14,7 +14,7 @@ This project showcases a complete GitOps workflow for deploying and managing an 
     *   Configure ArgoCD to manage the Nginx application.
     *   (Potentially) Automate further operational tasks.
 
-## 🔧 Tools & Technologies Leveraged
+## Tools & Technologies Leveraged
 
 *   **AWS EKS (Elastic Kubernetes Service):** Managed Kubernetes service on AWS.
 *   **ArgoCD:** Declarative GitOps continuous delivery tool for Kubernetes.
@@ -25,7 +25,7 @@ This project showcases a complete GitOps workflow for deploying and managing an 
 *   **YAML:** Data serialization language for Kubernetes manifests and configurations.
 *   **AWS CLI & `kubectl`:** Command-line tools for interacting with AWS and Kubernetes.
 
-## 📁 Key Project Files & Structure
+## Key Project Files & Structure
 .
 ├── .github/workflows/ # GitHub Actions workflows
 │ └── eks-deploy.yaml # Workflow for ArgoCD setup & app deployment
@@ -50,7 +50,7 @@ This project showcases a complete GitOps workflow for deploying and managing an 
     *   The target Kubernetes cluster and namespace for deployment (`destination`).
     *   The synchronization policy (e.g., `automated: { prune: true, selfHeal: true }`).
 
-## 🚀 Deployment & Workflow Overview
+## Deployment & Workflow Overview
 
 1.  **Prerequisites:**
     *   An AWS account with an EKS cluster named `gitops-cluster` (or modify `eks-deploy.yaml` accordingly).
@@ -72,7 +72,7 @@ This project showcases a complete GitOps workflow for deploying and managing an 
     *   ArgoCD will then synchronize these changes to the EKS cluster, ensuring the live state matches the desired state defined in Git.
 
 
-## 📸 Screenshots
+## Screenshots
 
 *   **GitHub Actions Workflow Success:**
 ![GitHub Actions](actions.png)
@@ -83,7 +83,7 @@ This project showcases a complete GitOps workflow for deploying and managing an 
 *   **ArgoCD UI - After an Update (Nginx to Httpd):**
 ![ArgoCD UI](argocdhttpd.png)
 
-## ✅ Project Status & Key Milestones Achieved
+## Project Status & Key Milestones Achieved
 
 *   [✔] AWS EKS cluster prerequisites assumed/configured.
 *   [✔] GitHub Actions workflow (`eks-deploy.yaml`) for automation created.
